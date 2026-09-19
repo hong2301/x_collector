@@ -205,7 +205,6 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                             if qUrl:
                                 quotedPostId = qUrl.rsplit('/status/', 1)[-1]
                             break
-                    print()
 
                     fbzEles=postEle.eles("@@class=css-g5y9jx r-1wbh5a2 r-dnmrzs@@tag()=div",timeout=0.05)
                     for fbzEle in fbzEles:
@@ -334,9 +333,10 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                 with open(CSV_PATH, 'a', encoding='utf-8-sig', newline='') as f:
                     writer = csv.writer(f)
                     if not file_exists:
-                        writer.writerow(['发布者', '发布者昵称', '发布时间', '正文', '正文语言', '提及账号', '外链原始地址', '外链最终地址', '媒体数据', '点赞数', '回复数', '收藏数', '转发数', '浏览量', '话题标签', '关键词', '链接', '搜索链接', '写入时间'])
-                    writer.writerow([fbz, fbzNc, fbsj, zw, lang, mentions, wailian, wailian_final, json.dumps(mediaData, ensure_ascii=False), dz, hf, sc, zf, ll, ht, keyword, url, task_url, time.strftime('%Y-%m-%d %H:%M:%S')])
+                        writer.writerow(['发布者', '发布者昵称', '发布时间', '正文', '正文语言', '提及账号', '外链原始地址', '外链最终地址', '媒体数据', '是否转发', '是否回复', '是否引用', '会话ID', '转发帖ID', '引用帖ID', '回复帖ID', '被回复账号', '引用帖转发数', '点赞数', '回复数', '收藏数', '转发数', '浏览量', '话题标签', '关键词', '链接', '搜索链接', '写入时间'])
+                    writer.writerow([fbz, fbzNc, fbsj, zw, lang, mentions, wailian, wailian_final, json.dumps(mediaData, ensure_ascii=False), isRetweet, isReply, isQuote, conversationId, retweetedPostId, quotedPostId, inReplyToPostId, inReplyToUserId, quotePostRetweetCount, dz, hf, sc, zf, ll, ht, keyword, url, task_url, time.strftime('%Y-%m-%d %H:%M:%S')])
                 print(f"[{i}] 已写入: {fbz} | {fbsj}")
+                
                 # 每次写入后随机短暂等待，避免滚动过快被限流
                 time.sleep(random.uniform(1, 2))
                 postCount += 1
