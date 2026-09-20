@@ -1,12 +1,12 @@
 from DrissionPage import Chromium, ChromiumOptions
 import time
 import random
-import csv
 import os
 import re
 import html
 import json
 import requests
+import argparse
 from lxml import html as lh
 
 # 每条链接最多采集的帖子数（按需求每 input 采 100 条）
@@ -14,7 +14,14 @@ MAX_POSTS_PER_LINK = 999999999999999
 # 帖子页面下是否采集评论贴
 isCollectReplyPost=False
 
-tabPort = 5268
+# 命令行参数：浏览器端口、起始/结束索引（1-based，对应 input.csv 行号）
+parser = argparse.ArgumentParser(description='输入关键词批量采集帖子脚本')
+parser.add_argument('--port', type=int, default=5268, help='浏览器调试端口（默认 5268）')
+parser.add_argument('--start', type=int, default=1, help='起始索引，默认 1')
+parser.add_argument('--end', type=int, default=0, help='结束索引，0 表示采集到末尾（默认 0=全部）')
+args = parser.parse_args()
+
+tabPort = args.port
 dp=Chromium(tabPort)
 tab=dp.get_tab()
 # tab.ele("@class=asdf",timeout=0.1).click()
@@ -70,15 +77,30 @@ def parse_quote_url(q):
         return out.join('|');''')
     return (info.split('|')[0] if info else '').replace('https://twitter.com/', 'https://x.com/')
 
-def append_image_csv(img_url, img_b64):
-    """追加图片记录到图片 CSV（追加模式）：图片链接, base64 数据(data URI), OCR 识别(待填)"""
-    IMG_CSV = 'image_ocr.csv'
-    file_exists = os.path.exists(IMG_CSV)
-    with open(IMG_CSV, 'a', encoding='utf-8-sig', newline='') as f:
-        w = csv.writer(f)
-        if not file_exists:
-            w.writerow(['图片链接', 'base64数据', 'ocr识别'])
-        w.writerow([img_url, f'data:image/webp;base64,{img_b64}', ''])
+def extract_post_id(url):
+    """从帖子链接提取 status id：https://x.com/a/status/1234567890 -> 1234567890；提取不到返回 ''"""
+    m = re.search(r'/status/(\d+)', url or '')
+    return m.group(1) if m else ''
+
+
+def save_image_json(img_url, img_b64):
+    """图片即刻保存为 JSON 文件到 imgData/：文件名 = 帖子链接 id + 图片索引（如 1234567890_1.json）"""
+    IMG_DIR = 'imgData'
+    os.makedirs(IMG_DIR, exist_ok=True)
+    m = re.search(r'/status/(\d+)(?:/photo/(\d+))?', img_url or '')
+    post_id = m.group(1) if m else ''
+    idx = m.group(2) if m and m.group(2) else '1'
+    if not post_id:
+        post_id = 'no_id_' + time.strftime('%Y%m%d%H%M%S')
+        print('警告：无法从图片链接提取帖子id，改用时间戳命名:', img_url)
+    filename = os.path.join(IMG_DIR, f"{post_id}_{idx}.json")
+    data = {
+        'imageUrl': img_url,
+        'base64': f'data:image/webp;base64,{img_b64}',
+        'ocr': ''
+    }
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 def expand_url(u, timeout=10):
     """展开短链/跳转链接，返回最终完整 URL；超时/失败记录为空字符串。走本机代理(7897)"""
@@ -122,11 +144,12 @@ with open("input.csv", 'r', encoding='utf-8') as f:
         keyword = parts[1].strip() if len(parts) > 1 else ''
         tasks.append((url, keyword))
 
-# 输入开始/结束索引，支持分段采集（1-based，对应 input.csv 行号）
-start = int(input(f"请输入开始索引 (1~{len(tasks)}): ").strip())
-end = int(input(f"请输入结束索引 (1~{len(tasks)}): ").strip())
+# 开始/结束索引（命令行参数），支持分段采集（1-based，对应 input.csv 行号）
+start = args.start
+end = args.end if args.end else len(tasks)
 start = max(1, min(start, len(tasks)))
 end = max(start, min(end, len(tasks)))
+print(f"本次采集范围: 第 {start}~{end} 行（共 {len(tasks)} 行），端口: {tabPort}")
 
 for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
     try:
@@ -297,7 +320,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                                     if mediaType=='img':
                                         try:
                                             imgBase64=mediaItem.get_screenshot(as_base64='webp',scroll_to_center=True)
-                                            append_image_csv(mediaUrl, imgBase64)  # 追加到图片 CSV
+                                            save_image_json(mediaUrl, imgBase64)  # 图片即刻保存 JSON
                                         except Exception as e:
                                             print('图片',e)
                                 break
@@ -331,7 +354,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                             if mediaType=='img':
                                 try:
                                     imgBase64=mediaBox.get_screenshot(as_base64='webp',scroll_to_center=True)
-                                    append_image_csv(mediaUrl, imgBase64)  # 追加到图片 CSV
+                                    save_image_json(mediaUrl, imgBase64)  # 图片即刻保存 JSON
                                 except Exception as e:
                                     print('图片',e)
 
@@ -339,15 +362,46 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                 except Exception as e:
                     print(e)
 
-                # 即刻写入 CSV
-                CSV_PATH = "output.csv"
-                file_exists = os.path.exists(CSV_PATH)
-                with open(CSV_PATH, 'a', encoding='utf-8-sig', newline='') as f:
-                    writer = csv.writer(f)
-                    if not file_exists:
-                        writer.writerow(['发布者', '发布者昵称', '发布时间', '正文', '正文语言', '提及账号', '外链原始地址', '外链最终地址', '媒体数据', '是否转发', '是否回复', '是否引用', '会话ID', '转发帖ID', '引用帖ID', '回复帖ID', '被回复账号', '引用帖转发数', '点赞数', '回复数', '收藏数', '转发数', '浏览量', '话题标签', '关键词', '链接', '搜索链接', '写入时间'])
-                    writer.writerow([fbz, fbzNc, fbsj, zw, lang, mentions, wailian, wailian_final, json.dumps(mediaData, ensure_ascii=False), isRetweet, isReply, isQuote, conversationId, retweetedPostId, quotedPostId, inReplyToPostId, inReplyToUserId, quotePostRetweetCount, dz, hf, sc, zf, ll, ht, keyword, postUrl, task_url, time.strftime('%Y-%m-%d %H:%M:%S')])
-                print(f"[{i}] 已写入: {fbz} | {fbsj}")
+                # 即刻写入 JSON 到 postData/：每篇帖子保存为一个文件，文件名 = 帖子链接 id
+                POST_DIR = 'postData'
+                os.makedirs(POST_DIR, exist_ok=True)
+                post_id = extract_post_id(postUrl)
+                if not post_id:
+                    post_id = 'no_id_' + time.strftime('%Y%m%d%H%M%S')
+                    print('警告：无法从帖子链接提取id，改用时间戳命名:', postUrl)
+                post_data = {
+                    'username': fbz,
+                    'nickname': fbzNc,
+                    'postTime': fbsj,
+                    'text': zw,
+                    'lang': lang,
+                    'mentions': mentions,
+                    'externalLink': wailian,
+                    'externalLinkFinal': wailian_final,
+                    'mediaData': mediaData,
+                    'isRetweet': isRetweet,
+                    'isReply': isReply,
+                    'isQuote': isQuote,
+                    'conversationId': conversationId,
+                    'retweetedPostId': retweetedPostId,
+                    'quotedPostId': quotedPostId,
+                    'inReplyToPostId': inReplyToPostId,
+                    'inReplyToUserId': inReplyToUserId,
+                    'quotePostRetweetCount': quotePostRetweetCount,
+                    'likeCount': dz,
+                    'replyCount': hf,
+                    'bookmarkCount': sc,
+                    'repostCount': zf,
+                    'viewCount': ll,
+                    'hashtags': ht,
+                    'keyword': keyword,
+                    'postUrl': postUrl,
+                    'searchUrl': task_url,
+                    'writeTime': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                with open(os.path.join(POST_DIR, f"{post_id}.json"), 'w', encoding='utf-8') as f:
+                    json.dump(post_data, f, ensure_ascii=False, indent=2)
+                print(f"[{i}] 已写入: {post_id}.json | {fbz} | {fbsj}")
                 
                 # 每次写入后随机短暂等待，避免滚动过快被限流
                 time.sleep(random.uniform(1, 2))
