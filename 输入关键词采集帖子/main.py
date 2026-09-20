@@ -11,6 +11,8 @@ from lxml import html as lh
 
 # 每条链接最多采集的帖子数（按需求每 input 采 100 条）
 MAX_POSTS_PER_LINK = 999999999999999
+# 帖子页面下是否采集评论贴
+isCollectReplyPost=False
 
 tabPort = 5268
 dp=Chromium(tabPort)
@@ -129,9 +131,9 @@ end = max(start, min(end, len(tasks)))
 for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
     try:
         task_url = url
-        print(f"{i}/{len(tasks)}: {url} | 关键词: {keyword}")
-        # tab.get(url)
-
+        print(f"{i}/{len(tasks)}: {task_url} | 关键词: {keyword}")
+        tab.get(task_url)
+        tab.scroll.to_top()
 
         # 获取帖子
         checkNum=0
@@ -147,7 +149,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                 break
             postEles=tab.eles("@tag()=article",timeout=1)
             for postEle in postEles:
-                url=''
+                postUrl=''
                 fbz=''
                 fbzNc=''
                 fbsj=''
@@ -178,17 +180,21 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                     if seeMoreClick(tab):
                         time.sleep(random.uniform(1,2))
 
+                    
+
                     urlEle=postEle.ele("@@tag()=a@@class=css-146c3p1 r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-16dba41 r-xoduu5 r-1q142lx r-1w6e6rj r-9aw3ui r-3s2u2q r-1loqt21",timeout=0.05)
+                    if not urlEle:
+                        urlEle=postEle.ele("@@tag()=a@@class=css-1jxf684 r-bcqeeo r-1ttztb7 r-qvutc0 r-poiln3 r-xoduu5 r-1q142lx r-1w6e6rj r-9aw3ui r-3s2u2q r-1loqt21",timeout=0.05)
                     if urlEle:
-                        url=urlEle.link
+                        postUrl=urlEle.link
                         timeEle=urlEle.ele("@tag()=time",timeout=0.05)
                         if timeEle:
                             fbsj=timeEle.attr("datetime")
-                    if url in urls:
+                    if postUrl in urls:
                         continue
                     postEle.scroll.to_see()
                     checkNum=0
-                    urls.append(url)
+                    urls.append(postUrl)
 
                     replyEle=postEle.ele("@class=css-g5y9jx r-4qtqp9 r-zl2h9q",timeout=0.1)
                     if replyEle:
@@ -218,6 +224,8 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                         fbzNc=fbzNcEle.text
 
                     zwEle=postEle.ele("@@class=css-146c3p1 r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-16dba41 r-bnwqim",timeout=0.05)
+                    if not zwEle:
+                        zwEle=postEle.ele("@@class=css-146c3p1 r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-1inkyih r-16dba41 r-bnwqim r-135wba7",timeout=0.05)
                     if zwEle:
                         # 正文语言
                         lang=zwEle.attr('lang')
@@ -238,6 +246,9 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                         wailian_final = ' '.join(expand_url(x) for x in wailian.split()) if wailian else ''
 
                     sjEle=postEle.ele("@class=css-g5y9jx r-1kbdv8c r-18u37iz r-1wtj0ep r-1ye8kvj r-1s2bzr4",timeout=0.05)
+                    if not sjEle:
+                        sjEle=postEle.ele("@class=css-g5y9jx r-1kbdv8c r-18u37iz r-1oszu61 r-3qxfft r-n7gxbd r-2sztyj r-1efd50x r-5kkj8d r-h3s6tt r-1wtj0ep",timeout=0.05)
+                        
                     if sjEle:
                         sj=sjEle.attr("aria-label")
                         # 解析5个指标: repost, likes, replies, bookmark, views
@@ -262,7 +273,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                             if 'ScrollSnap-List' in data_testid:
                                 mediaEles=divEle.children(timeout=1)
                                 for mediaIndex,mediaItem in enumerate(mediaEles):
-                                    mediaUrl=url+'/photo/'+str(mediaIndex+1)
+                                    mediaUrl=postUrl+'/photo/'+str(mediaIndex+1)
                                     mediaType='img'
                                     videoDuration=''
 
@@ -289,10 +300,10 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                                             append_image_csv(mediaUrl, imgBase64)  # 追加到图片 CSV
                                         except Exception as e:
                                             print('图片',e)
-                                        break
+                                break
                         # 单媒体
                         if len(mediaData)==0:
-                            mediaUrl=url+'/photo/1'  # 单媒体只有 1 个（mediaIndex 仅存在于多媒体循环，此处未定义）
+                            mediaUrl=postUrl+'/photo/1'  # 单媒体只有 1 个（mediaIndex 仅存在于多媒体循环，此处未定义）
                             mediaType='gif'
                             videoDuration=''
 
@@ -323,10 +334,11 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                                     append_image_csv(mediaUrl, imgBase64)  # 追加到图片 CSV
                                 except Exception as e:
                                     print('图片',e)
+
+                    # print(mediaData)
                 except Exception as e:
                     print(e)
 
-                input(123)
                 # 即刻写入 CSV
                 CSV_PATH = "output.csv"
                 file_exists = os.path.exists(CSV_PATH)
@@ -334,13 +346,17 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                     writer = csv.writer(f)
                     if not file_exists:
                         writer.writerow(['发布者', '发布者昵称', '发布时间', '正文', '正文语言', '提及账号', '外链原始地址', '外链最终地址', '媒体数据', '是否转发', '是否回复', '是否引用', '会话ID', '转发帖ID', '引用帖ID', '回复帖ID', '被回复账号', '引用帖转发数', '点赞数', '回复数', '收藏数', '转发数', '浏览量', '话题标签', '关键词', '链接', '搜索链接', '写入时间'])
-                    writer.writerow([fbz, fbzNc, fbsj, zw, lang, mentions, wailian, wailian_final, json.dumps(mediaData, ensure_ascii=False), isRetweet, isReply, isQuote, conversationId, retweetedPostId, quotedPostId, inReplyToPostId, inReplyToUserId, quotePostRetweetCount, dz, hf, sc, zf, ll, ht, keyword, url, task_url, time.strftime('%Y-%m-%d %H:%M:%S')])
+                    writer.writerow([fbz, fbzNc, fbsj, zw, lang, mentions, wailian, wailian_final, json.dumps(mediaData, ensure_ascii=False), isRetweet, isReply, isQuote, conversationId, retweetedPostId, quotedPostId, inReplyToPostId, inReplyToUserId, quotePostRetweetCount, dz, hf, sc, zf, ll, ht, keyword, postUrl, task_url, time.strftime('%Y-%m-%d %H:%M:%S')])
                 print(f"[{i}] 已写入: {fbz} | {fbsj}")
                 
                 # 每次写入后随机短暂等待，避免滚动过快被限流
                 time.sleep(random.uniform(1, 2))
+                # input(123)
+
                 postCount += 1
                 if postCount >= MAX_POSTS_PER_LINK:
+                    break
+                if isCollectReplyPost and task_url==postUrl:
                     break
 
             tab.scroll(300)
