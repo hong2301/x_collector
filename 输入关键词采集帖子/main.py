@@ -156,13 +156,30 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
         task_url = url
         print(f"{i}/{len(tasks)}: {task_url} | 关键词: {keyword}")
         tab.get(task_url)
-        tab.scroll.to_top()
+        for ii in range(0,3):
+            tab.scroll.to_top()
+            time.sleep(1)
 
+            
         # 获取帖子
+        whileBtn=True
         checkNum=0
         postCount=0
         urls=[]
-        while checkNum<50 and postCount<MAX_POSTS_PER_LINK:
+        while checkNum<50 and whileBtn:
+
+            # 检查是否需要刷新
+            for ii in range(0,3):
+                isRetry=False
+                buttonEles=tab.eles("@tag()=button",timeout=0.1)
+                for buttonEle in buttonEles:
+                    if 'Retry' in buttonEle.text:
+                        isRetry=True
+                        tab.get(task_url)
+                        break
+                if not isRetry:
+                    break
+
             checkNum+=1
             time.sleep(random.uniform(0.1, 0.2))
             noResultFlag=noResult(tab)
@@ -172,7 +189,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                 break
             postEles=tab.eles("@tag()=article",timeout=1)
             for postEle in postEles:
-                postUrl=''
+                postUrl = str(int(time.time()))
                 fbz=''
                 fbzNc=''
                 fbsj=''
@@ -197,13 +214,22 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                 inReplyToPostId=''
                 inReplyToUserId=''
                 quotePostRetweetCount=''
+                postStatus='active'
 
                 try:
 
                     if seeMoreClick(tab):
                         time.sleep(random.uniform(1,2))
 
+                    # 看看改帖子的状态
+                    if 'This Post was deleted by the Post author. ' in postEle.text:
+                        print('帖子已被删除')
+                        postStatus='delete'
+                    if 'This Post is from a suspended account.' in postEle.text:
+                        print('帖子suspended')
+                        postStatus='suspended'
                     
+
 
                     urlEle=postEle.ele("@@tag()=a@@class=css-146c3p1 r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-16dba41 r-xoduu5 r-1q142lx r-1w6e6rj r-9aw3ui r-3s2u2q r-1loqt21",timeout=0.05)
                     if not urlEle:
@@ -242,9 +268,10 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                                 fbz=fbzEle.text
                                 break  # 赋值后结束循环
                     
-                    fbzNcEle=postEle.ele("@class=css-g5y9jx r-1awozwy r-18u37iz r-1wbh5a2 r-dnmrzs",timeout=0.05)
+                    fbzNcEle=postEle.ele("@@tag()=a@@class=css-g5y9jx r-1wbh5a2 r-dnmrzs r-1ny4l3l r-1loqt21",timeout=0.05)
                     if fbzNcEle:
                         fbzNc=fbzNcEle.text
+                        fbz='a'+(fbzNcEle.link or '')
 
                     zwEle=postEle.ele("@@class=css-146c3p1 r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-16dba41 r-bnwqim",timeout=0.05)
                     if not zwEle:
@@ -270,10 +297,15 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
 
                     sjEle=postEle.ele("@class=css-g5y9jx r-1kbdv8c r-18u37iz r-1wtj0ep r-1ye8kvj r-1s2bzr4",timeout=0.05)
                     if not sjEle:
-                        sjEle=postEle.ele("@class=css-g5y9jx r-1kbdv8c r-18u37iz r-1oszu61 r-3qxfft r-n7gxbd r-2sztyj r-1efd50x r-5kkj8d r-h3s6tt r-1wtj0ep",timeout=0.05)
-                        
+                        pathEles=postEle.eles("@tag()=path",timeout=1)
+                        for pathEle in pathEles:
+                            if pathEle.attr('d')=='M1.751 10c0-4.42 3.584-8 8.005-8h4.366c4.49 0 8.129 3.64 8.129 8.13 0 2.96-1.607 5.68-4.196 7.11l-8.054 4.46v-3.69h-.067c-4.49.1-8.183-3.51-8.183-8.01zm8.005-6c-3.317 0-6.005 2.69-6.005 6 0 3.37 2.77 6.08 6.138 6.01l.351-.01h1.761v2.3l5.087-2.81c1.951-1.08 3.163-3.13 3.163-5.36 0-3.39-2.744-6.13-6.129-6.13H9.756z':
+                                sjEle=pathEle.parent(7)
+                                break
+                    
                     if sjEle:
                         sj=sjEle.attr("aria-label")
+                        # print(sj)
                         # 解析5个指标: repost, likes, replies, bookmark, views
                         m_repost  = re.search(r'(\d[\d,]*)\s*repost', sj)
                         m_likes   = re.search(r'(\d[\d,]*)\s*likes?', sj)
@@ -397,6 +429,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                     'keyword': keyword,
                     'postUrl': postUrl,
                     'searchUrl': task_url,
+                    'postStatus': postStatus,
                     'writeTime': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
                 with open(os.path.join(POST_DIR, f"{post_id}.json"), 'w', encoding='utf-8') as f:
@@ -409,8 +442,10 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
 
                 postCount += 1
                 if postCount >= MAX_POSTS_PER_LINK:
+                    whileBtn=False
                     break
-                if isCollectReplyPost and task_url==postUrl:
+                if not isCollectReplyPost and extract_post_id(task_url)==extract_post_id(postUrl):
+                    whileBtn=False
                     break
 
             tab.scroll(300)
@@ -418,7 +453,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
         # 该链接采集不足60条时增加等待，避免请求过快被限流
         # （无结果分支已另行等待过，不重复叠加）
         if postCount < 60 and not noResultFlag:
-            time.sleep(random.uniform(20, 30))
+            time.sleep(random.uniform(10, 20))
     except Exception as e:
         print(f'[{i}] 采集失败，跳过: {e}')
         time.sleep(random.uniform(10, 15))
