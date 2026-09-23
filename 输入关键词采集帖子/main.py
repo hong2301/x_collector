@@ -102,6 +102,45 @@ def save_image_json(img_url, img_b64):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+def get_post_quote_counts(postEle):
+    """从帖子卡片的 React fiber 解析主帖的 quote_count / retweet_count / reply_count。
+    纯字符串匹配（不用递归遍历，避免卡浏览器）。返回 (quoteCount, retweetCount, replyCount) 或 (None, None, None)"""
+    js = r'''
+let keys = Object.keys(this).filter(k => k.startsWith("__react") && k.indexOf("Fiber") >= 0);
+if (!keys.length) return "";
+let node = this[keys[0]];
+let quotes = []; let pairs = []; let seen = new Set(); let guard = 0;
+while (node && guard < 50) {
+  let p = node.memoizedProps;
+  if (p) {
+    try {
+      let s = JSON.stringify(p);
+      let m;
+      let reQ = /"quote_count":(\d+)/g;
+      while ((m = reQ.exec(s))) quotes.push(+m[1]);
+      let reR = /"reply_count":(\d+),"retweet_count":(\d+)/g;
+      while ((m = reR.exec(s))) {
+        let key = m[1] + '|' + m[2];
+        if (!seen.has(key)) { seen.add(key); pairs.push({rp: +m[1], rt: +m[2]}); }
+      }
+    } catch(e) {}
+  }
+  node = node.return; guard++;
+}
+let qSeen = new Set(), qUniq = [];
+for (const q of quotes) { if (!qSeen.has(q)) { qSeen.add(q); qUniq.push(q); } }
+if (!pairs.length) return "";
+return JSON.stringify({qt: qUniq[0] !== undefined ? qUniq[0] : null, rt: pairs[0] ? pairs[0].rt : null, rp: pairs[0] ? pairs[0].rp : null});
+'''
+    try:
+        res = postEle.run_js(js, timeout=3)
+        if not res:
+            return (None, None, None)
+        d = json.loads(res)
+        return (d.get('qt'), d.get('rt'), d.get('rp'))
+    except Exception:
+        return (None, None, None)
+
 def expand_url(u, timeout=10):
     """展开短链/跳转链接，返回最终完整 URL；超时/失败记录为空字符串。走本机代理(7897)"""
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'}
@@ -204,6 +243,8 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                 zf=''
                 ll=''
                 ht=''
+                qc=''
+                pureRt=''
                 mediaData=[]
                 isRetweet=0
                 isReply=0
@@ -317,7 +358,13 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                         sc = m_book.group(1)    if m_book    else '0'
                         dz = m_likes.group(1)   if m_likes   else '0'
                         ll = m_views.group(1)   if m_views   else '0'
-                    
+
+                    # 引用转发数(quote_count)：从 React fiber 解析；纯转发 = 界面 reposts - quote_count
+                    qc, _, _ = get_post_quote_counts(postEle)
+                    if qc is not None and zf.replace(',', '').isdigit():
+                        pureRt = int(zf.replace(',', '')) - qc
+                    else:
+                        pureRt = ''                    
                     # 媒体数据
                     mediaBox=postEle.ele("@class=css-g5y9jx r-9aw3ui",timeout=0.1)
                     if mediaBox:
@@ -424,6 +471,8 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                     'replyCount': hf,
                     'bookmarkCount': sc,
                     'repostCount': zf,
+                    'quoteCount': qc if qc is not None else '',
+                    'pureRetweetCount': pureRt,
                     'viewCount': ll,
                     'hashtags': ht,
                     'keyword': keyword,
