@@ -12,7 +12,9 @@ from lxml import html as lh
 # 每条链接最多采集的帖子数（按需求每 input 采 100 条）
 MAX_POSTS_PER_LINK = 999999999999999
 # 帖子页面下是否采集评论贴
-isCollectReplyPost=False
+isCollectReplyPost=True
+# 是否采集媒体
+isCollectMedia=False
 
 # 命令行参数：浏览器端口、起始/结束索引（1-based，对应 input.csv 行号）
 parser = argparse.ArgumentParser(description='输入关键词批量采集帖子脚本')
@@ -376,80 +378,83 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                     if qc is not None and zf.replace(',', '').isdigit():
                         pureRt = int(zf.replace(',', '')) - qc
                     else:
-                        pureRt = ''                    
+                        pureRt = ''    
+
+                                    
                     # 媒体数据
-                    mediaBox=postEle.ele("@class=css-g5y9jx r-9aw3ui",timeout=0.1)
-                    if mediaBox:
-                        # 多媒体
-                        divEles=mediaBox.eles("@tag()=div",timeout=0.1)
-                        for divEle in divEles:
-                            data_testid = divEle.attr('data-testid') or ''  # 安全访问：无此属性时按空串处理
-                            if 'ScrollSnap-List' in data_testid:
-                                mediaEles=divEle.children(timeout=1)
-                                for mediaIndex,mediaItem in enumerate(mediaEles):
-                                    mediaUrl=postUrl+'/photo/'+str(mediaIndex+1)
-                                    mediaType='img'
-                                    videoDuration=''
+                    if isCollectMedia:
+                        mediaBox=postEle.ele("@class=css-g5y9jx r-9aw3ui",timeout=0.1)
+                        if mediaBox:
+                            # 多媒体
+                            divEles=mediaBox.eles("@tag()=div",timeout=0.1)
+                            for divEle in divEles:
+                                data_testid = divEle.attr('data-testid') or ''  # 安全访问：无此属性时按空串处理
+                                if 'ScrollSnap-List' in data_testid:
+                                    mediaEles=divEle.children(timeout=1)
+                                    for mediaIndex,mediaItem in enumerate(mediaEles):
+                                        mediaUrl=postUrl+'/photo/'+str(mediaIndex+1)
+                                        mediaType='img'
+                                        videoDuration=''
 
-                                    buttons=mediaItem.eles("@tag()=button",timeout=0.1)
-                                    for button in buttons:
-                                        label=button.attr('aria-label') or ''  # 安全访问：无此属性时按空串处理
-                                        if 'Play this video' in label:
-                                            mediaType='video'
-                                            # 视频时长：找含 0:32 样式的 span（eles 遍历，ele 单元素不可迭代）
-                                            for span in mediaItem.eles("@tag()=span",timeout=0.1):
-                                                if re.search(r'\d+:\d+', span.text or ''):
-                                                    videoDuration=span.text or ''
-                                                    break
-                                        elif 'Play' in label:  # 非视频的 Play 按钮 → gif（video 分支已排除，不再覆盖）
-                                            mediaType='gif'
-                                    mediaData.append({
-                                        'mediaUrl': mediaUrl,
-                                        'mediaType': mediaType,
-                                        'videoDuration': videoDuration
-                                    })
-                                    if mediaType=='img':
-                                        try:
-                                            imgBase64=mediaItem.get_screenshot(as_base64='webp',scroll_to_center=True)
-                                            save_image_json(mediaUrl, imgBase64)  # 图片即刻保存 JSON
-                                        except Exception as e:
-                                            print('图片',e)
-                                break
-                        # 单媒体
-                        if len(mediaData)==0:
-                            mediaUrl=postUrl+'/photo/1'  # 单媒体只有 1 个（mediaIndex 仅存在于多媒体循环，此处未定义）
-                            mediaType='gif'
-                            videoDuration=''
+                                        buttons=mediaItem.eles("@tag()=button",timeout=0.1)
+                                        for button in buttons:
+                                            label=button.attr('aria-label') or ''  # 安全访问：无此属性时按空串处理
+                                            if 'Play this video' in label:
+                                                mediaType='video'
+                                                # 视频时长：找含 0:32 样式的 span（eles 遍历，ele 单元素不可迭代）
+                                                for span in mediaItem.eles("@tag()=span",timeout=0.1):
+                                                    if re.search(r'\d+:\d+', span.text or ''):
+                                                        videoDuration=span.text or ''
+                                                        break
+                                            elif 'Play' in label:  # 非视频的 Play 按钮 → gif（video 分支已排除，不再覆盖）
+                                                mediaType='gif'
+                                        mediaData.append({
+                                            'mediaUrl': mediaUrl,
+                                            'mediaType': mediaType,
+                                            'videoDuration': videoDuration
+                                        })
+                                        if mediaType=='img':
+                                            try:
+                                                imgBase64=mediaItem.get_screenshot(as_base64='webp',scroll_to_center=True)
+                                                save_image_json(mediaUrl, imgBase64)  # 图片即刻保存 JSON
+                                            except Exception as e:
+                                                print('图片',e)
+                                    break
+                            # 单媒体
+                            if len(mediaData)==0:
+                                mediaUrl=postUrl+'/photo/1'  # 单媒体只有 1 个（mediaIndex 仅存在于多媒体循环，此处未定义）
+                                mediaType='gif'
+                                videoDuration=''
 
-                            aEles=mediaBox.eles("@tag()=a",timeout=0.1)
-                            for aEle in aEles:
-                                if mediaUrl in aEle.link:
-                                    mediaType='img'
-                                    break
-                                
-                            # 视频时长：找含 0:32 样式的 span（单媒体时从 mediaBox 找，mediaItem 未定义）
-                            spans=mediaBox.eles("@tag()=span",timeout=0.1)
-                            for span in spans:
-                                if ":" in (span.text or ''):
-                                    mediaType='video'
-                                    videoDuration=span.text or ''
-                                    break
-                                if videoDuration!='':
-                                    break
-                                
-                            mediaData.append({
-                                'mediaUrl': mediaUrl,
-                                'mediaType': mediaType,
-                                'videoDuration': videoDuration
-                            })
-                            if mediaType=='img':
-                                try:
-                                    imgBase64=mediaBox.get_screenshot(as_base64='webp',scroll_to_center=True)
-                                    save_image_json(mediaUrl, imgBase64)  # 图片即刻保存 JSON
-                                except Exception as e:
-                                    print('图片',e)
+                                aEles=mediaBox.eles("@tag()=a",timeout=0.1)
+                                for aEle in aEles:
+                                    if mediaUrl in aEle.link:
+                                        mediaType='img'
+                                        break
+                                    
+                                # 视频时长：找含 0:32 样式的 span（单媒体时从 mediaBox 找，mediaItem 未定义）
+                                spans=mediaBox.eles("@tag()=span",timeout=0.1)
+                                for span in spans:
+                                    if ":" in (span.text or ''):
+                                        mediaType='video'
+                                        videoDuration=span.text or ''
+                                        break
+                                    if videoDuration!='':
+                                        break
+                                    
+                                mediaData.append({
+                                    'mediaUrl': mediaUrl,
+                                    'mediaType': mediaType,
+                                    'videoDuration': videoDuration
+                                })
+                                if mediaType=='img':
+                                    try:
+                                        imgBase64=mediaBox.get_screenshot(as_base64='webp',scroll_to_center=True)
+                                        save_image_json(mediaUrl, imgBase64)  # 图片即刻保存 JSON
+                                    except Exception as e:
+                                        print('图片',e)
 
-                    # print(mediaData)
+                        # print(mediaData)
                 except Exception as e:
                     print(e)
 
