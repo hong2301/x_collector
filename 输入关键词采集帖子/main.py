@@ -226,7 +226,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
             noResultFlag=noResult(tab)
             if noResultFlag:
                 print(f"[{i}] 无结果，跳过")
-                time.sleep(random.uniform(60, 90))
+                time.sleep(random.uniform(20, 30))
                 break
             postEles=tab.eles("@tag()=article",timeout=1)
             for postEle in postEles:
@@ -503,7 +503,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                 print(f"[{i}] 已写入: {post_id}.json | {fbz} | {fbsj}")
                 
                 # 每次写入后随机短暂等待，避免滚动过快被限流
-                time.sleep(random.uniform(1, 2))
+                time.sleep(random.uniform(0.01, 0.02))
                 # input(123)
 
                 postCount += 1
