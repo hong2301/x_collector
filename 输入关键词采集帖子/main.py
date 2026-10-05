@@ -270,7 +270,19 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                         print('帖子suspended')
                         postStatus='suspended'
                     
-
+                    # 检查是否为广告
+                    isGg=False
+                    ggEles=postEle.eles("@tag()=div",timeout=0.05)
+                    for ggEle in ggEles:
+                        # 安全取值：部分 ggEle 可能没有 attr/text，统一默认空字符串
+                        ggDir = getattr(ggEle, 'attr', None)
+                        ggDir = (ggDir('dir') or '') if callable(ggDir) else ''
+                        ggText = getattr(ggEle, 'text', '') or ''
+                        if 'ltr' in ggDir and 'Ad' in ggText:
+                            isGg=True
+                            break
+                    if isGg:
+                        continue
 
                     urlEle=postEle.ele("@@tag()=a@@class=css-146c3p1 r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-16dba41 r-xoduu5 r-1q142lx r-1w6e6rj r-9aw3ui r-3s2u2q r-1loqt21",timeout=0.05)
                     if not urlEle:
