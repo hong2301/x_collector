@@ -9,12 +9,25 @@ import requests
 import argparse
 from lxml import html as lh
 
-# 每条链接最多采集的帖子数（按需求每 input 采 100 条）
+# ====================== 配置区 ======================
+# 每条链接最多采集的帖子数
 MAX_POSTS_PER_LINK = 999999999999999
+# 每个关键词的目标条数：达到后自动跳过该词剩余链接；0 表示不限制
+MAX_POSTS_PER_KEYWORD = 310
+# 连续多少次滚动没有新帖就认为该搜索已到底（原硬编码为 50）
+EMPTY_SCROLL_LIMIT = 5
 # 帖子页面下是否采集评论贴
 isCollectReplyPost=True
 # 是否采集媒体
 isCollectMedia=False
+# 是否展开正文外链（t.co 等）为最终地址（字段 externalLinkFinal）
+# 不需要外链时设为 False，可明显提速（省去每个外链的 follow-redirect 请求）
+isCollectExternalLink=True
+# 外链展开使用的 HTTP/HTTPS 代理；置为空字符串 '' 表示直连
+EXPAND_PROXY = 'http://192.168.31.238:7897'
+# 单个外链展开的超时时间（秒）
+EXPAND_TIMEOUT = 10
+# ====================================================
 
 # 命令行参数：浏览器端口、起始/结束索引（1-based，对应 input.csv 行号）
 parser = argparse.ArgumentParser(description='输入关键词批量采集帖子脚本')
@@ -143,10 +156,12 @@ return JSON.stringify({qt: qUniq[0] !== undefined ? qUniq[0] : null, rt: pairs[0
     except Exception:
         return (None, None, None)
 
-def expand_url(u, timeout=10):
-    """展开短链/跳转链接，返回最终完整 URL；超时/失败记录为空字符串。走本机代理(7897)"""
+def expand_url(u, timeout=None):
+    """展开短链/跳转链接，返回最终完整 URL；超时/失败记录为空字符串。代理与超时见配置区"""
+    if timeout is None:
+        timeout = EXPAND_TIMEOUT
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'}
-    proxies = {'http': 'http://127.0.0.1:7897', 'https': 'http://127.0.0.1:7897'}
+    proxies = {'http': EXPAND_PROXY, 'https': EXPAND_PROXY} if EXPAND_PROXY else None
     # GET 优先：一定能拿到跟随 302 后的最终 URL
     try:
         r = requests.get(u, allow_redirects=True, timeout=timeout, headers=headers, proxies=proxies, stream=True)
@@ -192,7 +207,32 @@ start = max(1, min(start, len(tasks)))
 end = max(start, min(end, len(tasks)))
 print(f"本次采集范围: 第 {start}~{end} 行（共 {len(tasks)} 行），端口: {tabPort}")
 
+# ==== 按关键词统计已有有效数（达标即跳过剩余链接）====
+import glob as _glob
+
+def _kw_of(k):
+    return k.split('|')[0].strip()
+
+POST_DIR = 'postData'
+os.makedirs(POST_DIR, exist_ok=True)
+_kw_seen = {}
+for _fp in _glob.glob(os.path.join(POST_DIR, '*.json')):
+    try:
+        _d = json.load(open(_fp, encoding='utf-8'))
+    except Exception:
+        continue
+    _u = str(_d.get('postUrl', ''))
+    if not _u.startswith('http'):
+        continue
+    _kw_seen.setdefault(_kw_of(str(_d.get('keyword', ''))), set()).add(_u)
+_kw_count = {k: len(v) for k, v in _kw_seen.items()}
+print('已有各词有效数:', dict(sorted(_kw_count.items())))
+
 for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
+    _kw = _kw_of(keyword)
+    if MAX_POSTS_PER_KEYWORD and _kw_count.get(_kw, 0) >= MAX_POSTS_PER_KEYWORD:
+        print(f"[{i}] 词[{_kw}] 已达 {_kw_count.get(_kw, 0)} 条 >= 目标 {MAX_POSTS_PER_KEYWORD}，跳过")
+        continue
     try:
         task_url = url
         print(f"{i}/{len(tasks)}: {task_url} | 关键词: {keyword}")
@@ -207,7 +247,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
         checkNum=0
         postCount=0
         urls=[]
-        while checkNum<50 and whileBtn:
+        while checkNum < EMPTY_SCROLL_LIMIT and whileBtn:
 
             # 检查是否需要刷新
             for ii in range(0,3):
@@ -348,7 +388,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                         # 外链原始地址：正文中全部外链 URL（a 标签的 http/https href，排除话题/提及的相对路径）
                         wailian = ' '.join(re.findall(r'<a[^>]+href="(https?://[^"]+)"', inner))
                         # 外链最终地址：短链跟随重定向，保存最终完整 URL
-                        wailian_final = ' '.join(expand_url(x) for x in wailian.split()) if wailian else ''
+                        wailian_final = ' '.join(expand_url(x) for x in wailian.split()) if (wailian and isCollectExternalLink) else ''
 
                     sjEle=postEle.ele("@class=css-g5y9jx r-1kbdv8c r-18u37iz r-1wtj0ep r-1ye8kvj r-1s2bzr4",timeout=0.05)
                     if not sjEle:
@@ -463,8 +503,7 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                 os.makedirs(POST_DIR, exist_ok=True)
                 post_id = extract_post_id(postUrl)
                 if not post_id:
-                    post_id = 'no_id_' + time.strftime('%Y%m%d%H%M%S')
-                    print('警告：无法从帖子链接提取id，改用时间戳命名:', postUrl)
+                    continue  # 取不到帖子 id（广告/推荐卡片等）直接跳过，不写文件
                 post_data = {
                     'username': fbz,
                     'nickname': fbzNc,
@@ -498,8 +537,12 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                     'postStatus': postStatus,
                     'writeTime': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
-                with open(os.path.join(POST_DIR, f"{post_id}.json"), 'w', encoding='utf-8') as f:
+                _fp_out = os.path.join(POST_DIR, f"{post_id}.json")
+                _is_new = not os.path.exists(_fp_out)
+                with open(_fp_out, 'w', encoding='utf-8') as f:
                     json.dump(post_data, f, ensure_ascii=False, indent=2)
+                if _is_new:
+                    _kw_count[_kw] = _kw_count.get(_kw, 0) + 1
                 print(f"[{i}] 已写入: {post_id}.json | {fbz} | {fbsj}")
                 
                 # 每次写入后随机短暂等待，避免滚动过快被限流
@@ -507,6 +550,10 @@ for i, (url, keyword) in enumerate(tasks[start - 1:end], start=start):
                 # input(123)
 
                 postCount += 1
+                if MAX_POSTS_PER_KEYWORD and _kw_count.get(_kw, 0) >= MAX_POSTS_PER_KEYWORD:
+                    print(f"[{i}] 词[{_kw}] 已达 {_kw_count.get(_kw, 0)} 条，停止该词剩余采集")
+                    whileBtn=False
+                    break
                 if postCount >= MAX_POSTS_PER_LINK:
                     whileBtn=False
                     break
