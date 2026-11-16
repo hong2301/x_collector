@@ -1,17 +1,24 @@
-# 采集数据（每条帖子一个 json，体积大，不入库）
-输入关键词采集帖子/postData/
-输入关键词采集帖子/imgData/
-输入关键词采集帖子/old_*/
+# 采集数据（体量大，不入库）
+data/posts/
+data/images/
+data/_archive/
+data/_probe*/
+data/_rebuild/
 
 # 运行日志
-*.log
+logs/
 
-# 临时脚本与备份
-输入关键词采集帖子/run_*.sh
+# 本机指纹
+.env
+
+# 输入清单（会被不同任务覆盖，不纳入版本控制）
+code/input.csv
+
+# Python
+__pycache__/
+*.pyc
 *.bak_*
+*.bak-*
 
-# 工具本地配置
+# 本地工具配置
 .pi/
-
-# 运行时输入清单（会被不同任务覆盖，不纳入版本控制）
-输入关键词采集帖子/input.csv
